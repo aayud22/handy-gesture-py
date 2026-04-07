@@ -5,14 +5,13 @@ Pipeline (each frame):
   1. Capture frame from webcam & flip horizontally (mirror).
   2. Run hand detection via HandDetector.
   3. Classify each detected hand as Left or Right.
-  4. Left hand:  closed fist → take screenshot (3 s debounce).
-  5. Right hand: gesture determines mode:
+  4. Right hand: gesture determines mode:
        • Only index finger up       → AIR PAINT mode
        • Index + middle fingers up  → MOUSE CONTROL mode (+ pinch to click)
-       • All 5 fingers open         → CLEAR the paint canvas
-  6. Both hands visible: draw coloured connection lines between
+       • All 5 fingers + wipe L↔R   → CLEAR the paint canvas (like wiping a board)
+  5. Both hands visible: draw coloured connection lines between
      corresponding fingertips (thumb↔thumb, index↔index, etc.).
-  7. Overlay the air-paint canvas, draw skeletons, FPS, and mode label.
+  6. Overlay the air-paint canvas, draw skeletons, FPS, and mode label.
 
 Press 'q' to quit.
 """
@@ -32,8 +31,8 @@ from config import (
     FINGERTIP_LINE_THICKNESS,
     FRAME_REDUCTION,
     MAX_HANDS,
-    SCREENSHOT_COOLDOWN_SEC,
-    SCREENSHOTS_DIR,
+    # SCREENSHOT_COOLDOWN_SEC,  # Commented out — screenshot feature disabled
+    # SCREENSHOTS_DIR,
     SMOOTHING_FACTOR,
     TRACKING_CONFIDENCE,
     WINDOW_TITLE,
@@ -64,8 +63,8 @@ controller = MouseController(
     smoothing_factor=SMOOTHING_FACTOR,
     click_threshold=CLICK_THRESHOLD,
     click_cooldown=CLICK_COOLDOWN_SEC,
-    screenshot_cooldown=SCREENSHOT_COOLDOWN_SEC,
-    screenshots_dir=SCREENSHOTS_DIR,
+    # screenshot_cooldown=SCREENSHOT_COOLDOWN_SEC,  # Screenshot disabled
+    # screenshots_dir=SCREENSHOTS_DIR,
 )
 
 # Open the default webcam
@@ -83,23 +82,30 @@ if not cap.isOpened():
 air_canvas = None           # Created on first frame (need frame dimensions)
 prev_paint_point = None     # (x, y) or None
 
+# ── Wipe Gesture State (for "clear canvas" like wiping a blackboard) ──
+#  When all 5 fingers are open, we track the wrist's horizontal movement.
+#  If the hand swipes left↔right enough times (like erasing a board),
+#  the canvas is cleared.
+WIPE_MIN_DISTANCE = 80      # Minimum pixels for one "swipe segment"
+WIPE_CHANGES_NEEDED = 3     # Number of direction reversals to trigger clear
+wipe_prev_x = None          # Previous wrist x when in wipe mode
+wipe_direction = 0          # Current direction: -1=left, +1=right, 0=unknown
+wipe_direction_changes = 0  # Count of direction reversals so far
+wipe_segment_start_x = None # X at the start of the current swipe segment
+
 # ── FPS tracking ──────────────────────────────────────────
 prev_time = time.time()
 
-# ── Screenshot visual feedback timer ──────────────────────
-#  When a screenshot is taken, we show a banner for ~1 second.
-last_screenshot_time = 0.0
+# # ── Screenshot visual feedback timer (DISABLED) ──────────
+# last_screenshot_time = 0.0
 
 print("✋ HandyGesturePy is running!")
 print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 print("  RIGHT HAND gestures:")
 print("    ☝️  Index only       → Air Paint")
 print("    ✌️  Index + Middle   → Mouse Control")
-print("    👋 All 5 fingers    → Clear Canvas")
+print("    👋 Open hand + wipe → Clear Canvas (swipe L↔R)")
 print("    🤏 Pinch            → Left Click (in mouse mode)")
-print("")
-print("  LEFT HAND gestures:")
-print("    ✊ Closed fist      → Screenshot (3 s cooldown)")
 print("")
 print("  BOTH HANDS:")
 print("    🤝 Fingertip connection lines drawn automatically")
@@ -152,10 +158,10 @@ try:
                     right_idx = i
 
         # ══════════════════════════════════════════════════
-        #  4. LEFT HAND — SCREENSHOT ON CLOSED FIST
+        #  4. LEFT HAND — LABEL ONLY (screenshot disabled)
         # ══════════════════════════════════════════════════
-        #  Detect if ALL 4 fingers are curled (fist). If so,
-        #  fire a debounced screenshot via the controller.
+        #  The screenshot feature has been commented out while
+        #  we work on improving its reliability.
 
         if left_landmarks is not None:
             # Draw "Left" label near the wrist (Landmark 0)
@@ -166,19 +172,19 @@ try:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2,
             )
 
-            # Check for fist gesture
-            if detector.is_fist(left_landmarks):
-                took_screenshot = controller.take_screenshot()
-                if took_screenshot:
-                    last_screenshot_time = time.time()
+            # ── SCREENSHOT FEATURE (DISABLED) ──────────────
+            # if detector.is_fist(left_landmarks):
+            #     took_screenshot = controller.take_screenshot()
+            #     if took_screenshot:
+            #         last_screenshot_time = time.time()
 
-        # Show "SCREENSHOT!" banner for ~1 second after capturing
-        if (time.time() - last_screenshot_time) < 1.0:
-            cv2.putText(
-                frame, "SCREENSHOT SAVED!",
-                (cam_w // 2 - 180, cam_h // 2),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 0, 255), 3,
-            )
+        # # Show "SCREENSHOT!" banner for ~1 second after capturing
+        # if (time.time() - last_screenshot_time) < 1.0:
+        #     cv2.putText(
+        #         frame, "SCREENSHOT SAVED!",
+        #         (cam_w // 2 - 180, cam_h // 2),
+        #         cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 0, 255), 3,
+        #     )
 
         # ══════════════════════════════════════════════════
         #  5. RIGHT HAND — GESTURE MODE SELECTION
@@ -271,27 +277,91 @@ try:
                 )
 
             # ─────────────────────────────────────────────
-            #  MODE C: CLEAR CANVAS — all 5 fingers extended
+            #  MODE C: WIPE TO CLEAR — all 5 fingers open
+            #    + swipe hand left↔right like erasing a board
             # ─────────────────────────────────────────────
+            #  When all 5 fingers are extended, we enter WIPE mode.
+            #  We track the wrist's horizontal movement. Each time
+            #  the hand changes direction (left→right or right→left)
+            #  with enough travel distance, we count a "swipe".
+            #  After WIPE_CHANGES_NEEDED direction reversals,
+            #  the canvas is cleared.
             elif all(fingers):
-                right_mode = "CLEAR"
+                right_mode = "WIPE"
                 prev_paint_point = None  # Lift the "pen"
 
-                # Wipe the air canvas clean
-                air_canvas = np.zeros((cam_h, cam_w, 3), dtype=np.uint8)
+                # Get the wrist x-position for horizontal tracking
+                wrist_x = right_landmarks[0][1]
 
-                # Visual feedback
-                cv2.putText(
-                    frame, "CANVAS CLEARED",
-                    (cam_w // 2 - 140, cam_h // 2 + 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 200), 2,
-                )
+                if wipe_prev_x is not None:
+                    dx = wrist_x - wipe_prev_x
+
+                    # Ignore micro-movements (jitter < 3 px)
+                    if abs(dx) > 3:
+                        new_dir = 1 if dx > 0 else -1
+
+                        # Check for a direction reversal
+                        if wipe_direction != 0 and new_dir != wipe_direction:
+                            # The hand changed direction!
+                            # Was the segment long enough to count?
+                            if wipe_segment_start_x is not None:
+                                segment_dist = abs(wrist_x - wipe_segment_start_x)
+                                if segment_dist > WIPE_MIN_DISTANCE:
+                                    wipe_direction_changes += 1
+                            # Start tracking the new segment
+                            wipe_segment_start_x = wrist_x
+
+                        elif wipe_direction == 0:
+                            # First movement — start tracking from here
+                            wipe_segment_start_x = wrist_x
+
+                        wipe_direction = new_dir
+
+                wipe_prev_x = wrist_x
+
+                # ── Check if we've wiped enough to clear ──
+                if wipe_direction_changes >= WIPE_CHANGES_NEEDED:
+                    # Clear the canvas!
+                    air_canvas = np.zeros((cam_h, cam_w, 3), dtype=np.uint8)
+
+                    # Reset wipe state for next time
+                    wipe_prev_x = None
+                    wipe_direction = 0
+                    wipe_direction_changes = 0
+                    wipe_segment_start_x = None
+
+                    # Visual feedback
+                    cv2.putText(
+                        frame, "CANVAS CLEARED!",
+                        (cam_w // 2 - 160, cam_h // 2 + 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 200), 3,
+                    )
+                else:
+                    # Show wipe progress indicator
+                    progress = wipe_direction_changes
+                    cv2.putText(
+                        frame, f"Wiping... {progress}/{WIPE_CHANGES_NEEDED}",
+                        (cam_w // 2 - 120, 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2,
+                    )
+                    # Draw a progress bar
+                    bar_w = 200
+                    bar_x = cam_w // 2 - bar_w // 2
+                    fill = int(bar_w * progress / WIPE_CHANGES_NEEDED)
+                    cv2.rectangle(frame, (bar_x, 80), (bar_x + bar_w, 95), (100, 100, 100), -1)
+                    cv2.rectangle(frame, (bar_x, 80), (bar_x + fill, 95), (0, 200, 255), -1)
 
             # ─────────────────────────────────────────────
             #  ANY OTHER GESTURE → idle, reset paint pen
+            #  and reset wipe tracking state
             # ─────────────────────────────────────────────
             else:
                 prev_paint_point = None  # Lift the "pen"
+                # Reset wipe state if the hand isn't in the open position
+                wipe_prev_x = None
+                wipe_direction = 0
+                wipe_direction_changes = 0
+                wipe_segment_start_x = None
 
             # Draw the mode label near the right wrist
             cv2.putText(
@@ -301,8 +371,12 @@ try:
             )
 
         else:
-            # No right hand detected → lift the pen
+            # No right hand detected → lift the pen and reset wipe
             prev_paint_point = None
+            wipe_prev_x = None
+            wipe_direction = 0
+            wipe_direction_changes = 0
+            wipe_segment_start_x = None
 
         # ══════════════════════════════════════════════════
         #  6. BOTH HANDS — FINGERTIP CONNECTION LINES
