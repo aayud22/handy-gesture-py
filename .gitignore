@@ -1,0 +1,33 @@
+# ── Python ─────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ── Virtual environment ────────────────────────
+venv/
+.venv/
+env/
+
+# ── MediaPipe model bundles ────────────────────
+# Large binary files — download with:
+#   curl -L -o models/hand_landmarker.task \
+#     https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+models/*.task
+
+# ── Screenshots (generated at runtime) ────────
+screenshots/
+
+# ── IDE / Editor ───────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ── OS ─────────────────────────────────────────
+Thumbs.db
