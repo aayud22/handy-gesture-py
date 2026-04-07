@@ -35,12 +35,31 @@ CLICK_THRESHOLD = 30             # Max pixel distance between thumb & index to t
 CLICK_COOLDOWN_SEC = 0.4         # Minimum seconds between consecutive clicks (debounce)
 
 # ──────────────────────────────────────────────
-#  Screenshot (Closed Left Palm Gesture)
+#  Screenshot (Closed Left Fist Gesture)
 # ──────────────────────────────────────────────
-SCREENSHOT_COOLDOWN_SEC = 1.5    # Minimum seconds between screenshots (debounce)
+SCREENSHOT_COOLDOWN_SEC = 3.0    # 3-second debounce to prevent rapid screenshots
 SCREENSHOTS_DIR = "screenshots"  # Folder to save screenshots (relative to project root)
+
+# ──────────────────────────────────────────────
+#  Air Paint (Right Hand Index-Only Gesture)
+# ──────────────────────────────────────────────
+AIR_PAINT_COLOR = (0, 255, 255)  # Yellow in BGR
+AIR_PAINT_THICKNESS = 4          # Line thickness for painting strokes
+
+# ──────────────────────────────────────────────
+#  Two-Hand Fingertip Connection Lines
+# ──────────────────────────────────────────────
+# One color per finger pair: [Thumb, Index, Middle, Ring, Pinky]
+FINGERTIP_COLORS = [
+    (255, 0, 255),   # Magenta  — Thumb
+    (0, 255, 0),     # Green    — Index
+    (255, 255, 0),   # Cyan     — Middle
+    (0, 165, 255),   # Orange   — Ring
+    (0, 0, 255),     # Red      — Pinky
+]
+FINGERTIP_LINE_THICKNESS = 3
 
 # ──────────────────────────────────────────────
 #  Display
 # ──────────────────────────────────────────────
-WINDOW_TITLE = "HandyGesturePy — Mouse Control"
+WINDOW_TITLE = "HandyGesturePy"
